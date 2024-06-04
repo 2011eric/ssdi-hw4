@@ -32,26 +32,50 @@ public:
   }
 };
 } // namespace llvm
-// bool detect_vfncall();
 bool VTableCheckerModulePass::runOnModule(Module &M) {
 	outs() << __FUNCTION__ << '\n';
 	// do something
   for (auto &F : M) {
-    //errs() << "I saw a function called " << F.getName() << "!\n";
+    LLVMContext &C = F.getContext();
+
     for (auto &BB : F) {
-      errs() << "I saw a basic block! " << BB.getName() << '\n';
+      // errs() << "I saw a basic block! " << BB.getName() << '\n';
       ::std::vector<unsigned> inst_history;
+      GetElementPtrInst *gep;
+      LoadInst *load1, *load2;
+      load1 = load2 = nullptr;
       for (auto &I : BB) {
-        // errs() << "I saw an instruction! " << I.getOpcodeName() << '\n';
-        // errs() << I.getOpcode() << '\n';
         inst_history.push_back(I.getOpcode());
         if (inst_history.size() > 4) 
           inst_history.erase(inst_history.begin());
+        if (I.getOpcode() == Instruction::GetElementPtr) {
+          gep = dyn_cast<GetElementPtrInst>(&I);
+        }
+        if (I.getOpcode() == Instruction::Load) {
+          if (!load1){
+            load1 = dyn_cast<LoadInst>(&I);
+          } else {
+            if (!load2){
+              load2 = dyn_cast<LoadInst>(&I);
+            }else {
+              load1 = load2;
+              load2 = dyn_cast<LoadInst>(&I);
+            }
+          }
+        }
         if (inst_history[0] == Instruction::Load 
             && inst_history[1] == Instruction::GetElementPtr
             && inst_history[2] == Instruction::Load
             && inst_history[3] == Instruction::Call) {
           errs() << "VTable call detected!\n";
+          IRBuilder<> builder(load1->getNextNode());
+          Value* vtable_addr = gep->getPointerOperand();
+          ::std::vector<Type*> paramTypes = {vtable_addr->getType()};
+          Type *retType = Type::getVoidTy(C);
+          FunctionType *traceType = FunctionType::get(retType, paramTypes, true);
+          FunctionCallee traceFunc = F.getParent()->getOrInsertFunction("trace", traceType);
+          ::std::vector<Value*> args = {vtable_addr};
+          builder.CreateCall(traceFunc, args);
         }
       }
     }
